@@ -1,12 +1,20 @@
 #include "mlroot.h"
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <caml/address_class.h>
 #include <caml/alloc.h>
 #include <caml/memory.h>
 
-static void validate_abort()
+static void mlroot_abort(const char *function,
+                           const char *arg,
+                           const char *reason)
 {
-
+  fprintf(stderr, "%s: %s %s\n", function, arg, reason);
+  abort();
 }
+
+#define ABORT(arg, reason) mlroot_abort(__func__, #arg, reason)
 
 static bool is_registered_root(value *root)
 {
@@ -22,71 +30,77 @@ static bool is_registered_root(value *root)
   return false;
 }
 
-static void validate_root(value *root)
-{
-  (void)root;
-}
+#ifdef DEBUG
 
-static void validate_block(value *root)
-{
-  (void)root;
-}
+#define VALIDATE_ROOT(r) \
+  if (!is_registered_root(r)) ABORT(r, "is not a registered root")
 
-static void validate_block_field(value *root, size_t index)
-{
-  (void)root;
-}
+#define VALIDATE_BLOCK(r) \
+  VALIDATE_ROOT(r); \
+  if (!Is_block(*r)) ABORT(r, "is not a block")
 
-static void validate_block_tag(value *root, tag_t tag)
-{
-  (void)root;
-}
+#define VALIDATE_BLOCK_FIELD(r, index) \
+  VALIDATE_BLOCK(r); \
+  if (Wosize_val(*r) <= index) ABORT(r, "is too small (access out of bound)")
 
-static void validate_block_tag_field(value *root, tag_t tag, size_t index)
-{
-  (void)root;
-}
 
-static void validate_out_of_ocaml_heap(const void *ptr)
-{
+#define VALIDATE_BLOCK_TAG(r, tag) \
+  VALIDATE_BLOCK(r); \
+  if (Tag_val(*r) != tag) ABORT(r, "has an invalid tag")
 
-}
+#define VALIDATE_BLOCK_TAG_FIELD(r, tag, field) \
+  VALIDATE_BLOCK_TAG(r, tag, field); \
+  if (Wosize_val(*r) <= index) ABORT(r, "is too small (access out of bound)")
+
+#define VALIDATE_OUT_OF_HEAP(r) \
+  if (Is_in_heap(r)) ABORT(r, "should be out of OCaml heap")
+
+#else
+
+#define VALIDATE_ROOT(r) (void)0
+#define VALIDATE_BLOCK(r)(void)0
+#define VALIDATE_BLOCK_FIELD(r, index) (void)0
+#define VALIDATE_BLOCK_TAG(r, tag) (void)0
+#define VALIDATE_BLOCK_TAG_FIELD(r, tag, field) (void)0
+#define VALIDATE_OUT_OF_HEAP(r) (void)0
+
+#endif
 
 bool mlroot_value_is_int(value *root)
 {
-  validate_root(root);
+  VALIDATE_ROOT(root);
   return Is_long(*root);
 }
 
 tag_t mlroot_block_tag(value *root)
 {
-  validate_block(root);
+  VALIDATE_BLOCK(root);
   return Tag_val(*root);
 }
 
 mlsize_t mlroot_block_size(value *root)
 {
-  validate_block(root);
+  VALIDATE_BLOCK(root);
   return Wosize_val(*root);
 }
 
 void mlroot_alloc(value *dst, mlsize_t size, tag_t tag)
 {
-  validate_root(dst);
+  VALIDATE_ROOT(dst);
   *dst = caml_alloc(size, tag);
 }
 
 void mlroot_get_field(value *dst, value *src, int index)
 {
-  validate_root(dst);
-  validate_block_field(src, index);
+  VALIDATE_ROOT(dst);
+  VALIDATE_BLOCK_FIELD(src, index);
   *dst = Field(*src, index);
 }
 
 void mlroot_set_field(value *dst, int index, value *src)
 {
-  validate_block_field(dst, index);
-  validate_root(src);
+  VALIDATE_BLOCK_FIELD(dst, index);
+  VALIDATE_ROOT(src);
   Store_field(*dst, index, *src);
 }
 
@@ -94,87 +108,87 @@ void mlroot_set_field(value *dst, int index, value *src)
 
 long mlroot_long_val(value *root)
 {
-  validate_root(root);
+  VALIDATE_ROOT(root);
   return Long_val(*root);
 }
 
 void mlroot_val_long(value *dst, long v)
 {
-  validate_root(dst);
+  VALIDATE_ROOT(dst);
   *dst = v;
 }
 
 bool mlroot_bool_val(value *root)
 {
-  validate_root(root);
+  VALIDATE_ROOT(root);
   return Bool_val(*root);
 }
 
 void mlroot_val_bool(value *root, bool b)
 {
-  validate_root(root);
+  VALIDATE_ROOT(root);
   *root = Val_bool(b);
 }
 
 double mlroot_double_val(value *src)
 {
-  validate_root(src);
+  VALIDATE_ROOT(src);
   return Double_val(*src);
 }
 
 void mlroot_val_double(value* src, double d)
 {
-  validate_root(src);
+  VALIDATE_ROOT(src);
   *src = caml_copy_double(d);
 }
 
 void mlroot_doubles_alloc(value *dst, size_t len)
 {
-  validate_root(dst);
+  VALIDATE_ROOT(dst);
   *dst = caml_alloc_float_array(len);
 }
 
 size_t mlroot_doubles_length(value *src)
 {
-  validate_root(src);
+  VALIDATE_ROOT(src);
   return Wosize_val(*src) / Double_wosize;
 }
 
 double mlroot_doubles_get(value *src, int index)
 {
-  validate_root(src);
+  VALIDATE_ROOT(src);
   return Double_field(*src, index);
 }
 
 void mlroot_doubles_set(value *src, int index, double v)
 {
-  validate_block_tag(src, Double_array_tag);
+  VALIDATE_BLOCK_TAG(src, Double_array_tag);
   Store_double_field(*src, index, v);
 }
 
 char *mlroot_string_alloc(value *root, size_t len)
 {
-  validate_root(root);
+  VALIDATE_ROOT(root);
   *root = caml_alloc_string(len);
   return String_val(*root);
 }
 
 size_t mlroot_string_length(value *root)
 {
-  validate_block_tag(root, String_tag);
+  VALIDATE_BLOCK_TAG(root, String_tag);
   return caml_string_length(*root);
 }
 
 const char *mlroot_string_val(value *root)
 {
-  validate_block_tag(root, String_tag);
+  VALIDATE_BLOCK_TAG(root, String_tag);
   return String_val(*root);
 }
 
 void mlroot_string_copy(value *root, const char *src)
 {
-  validate_root(root);
-  validate_out_of_ocaml_heap(src);
+  VALIDATE_ROOT(root);
+  VALIDATE_OUT_OF_HEAP(src);
 
   size_t len = strlen(src);
   *root = caml_alloc_string(len);
@@ -183,8 +197,8 @@ void mlroot_string_copy(value *root, const char *src)
 
 void mlroot_string_init(value *root, const char *src, size_t len)
 {
-  validate_root(root);
-  validate_out_of_ocaml_heap(src);
+  VALIDATE_ROOT(root);
+  VALIDATE_OUT_OF_HEAP(src);
 
   *root = caml_alloc_string(len);
   memcpy(String_val(*root), src, len);
@@ -192,28 +206,28 @@ void mlroot_string_init(value *root, const char *src, size_t len)
 
 char  *mlroot_bytes_alloc(value *root, size_t len)
 {
-  validate_root(root);
+  VALIDATE_ROOT(root);
   *root = caml_alloc_string(len);
   return String_val(*root);
 }
 
 size_t mlroot_bytes_length(value *root)
 {
-  validate_block_tag(root, String_tag);
+  VALIDATE_BLOCK_TAG(root, String_tag);
   return caml_string_length(*root);
 }
 
 char  *mlroot_bytes_val(value *root)
 {
-  validate_block_tag(root, String_tag);
+  VALIDATE_BLOCK_TAG(root, String_tag);
   return String_val(*root);
 }
 
 
 void mlroot_bytes_copy(value *root, const char *src)
 {
-  validate_root(root);
-  validate_out_of_ocaml_heap(src);
+  VALIDATE_ROOT(root);
+  VALIDATE_OUT_OF_HEAP(src);
 
   size_t len = strlen(src);
   *root = caml_alloc_string(len);
@@ -223,8 +237,8 @@ void mlroot_bytes_copy(value *root, const char *src)
 
 void mlroot_bytes_init(value *root, const char *src, size_t len)
 {
-  validate_root(root);
-  validate_out_of_ocaml_heap(src);
+  VALIDATE_ROOT(root);
+  VALIDATE_OUT_OF_HEAP(src);
 
   *root = caml_alloc_string(len);
   memcpy(String_val(*root), src, len);
